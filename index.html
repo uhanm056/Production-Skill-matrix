@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkillPlan — Yanfeng Planá</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">
+    <div class="brand-q"><i></i><i></i><i></i><i></i></div>
+    <div class="brand-t">SkillPlan<small>Yanfeng Automotive · Planá nad Lužnicí</small></div>
+  </div>
+  <nav class="nav">
+    <button class="on" data-v="dash" onclick="go('dash')">Přehled</button>
+    <button data-v="matrix" onclick="go('matrix')">Matice dovedností</button>
+    <button data-v="plan" onclick="go('plan')">Týdenní plán</button>
+    <button data-v="set" onclick="go('set')">Nastavení</button>
+  </nav>
+  <div class="appbar-right">
+    <span class="chip-date" id="topDate"></span>
+    <button class="btn-ghost" onclick="window.print()">Tisk</button>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- ================= DASHBOARD ================= -->
+<div class="view on" id="v-dash">
+  <div class="page-hdr">
+    <div>
+      <h1 class="page-t">Přehled připravenosti</h1>
+      <div class="page-sub" id="dashSub">Matice dovedností × týdenní plán směn — celý závod</div>
+    </div>
+  </div>
+  <div id="dashBody"></div>
+</div>
+
+<!-- ================= MATRIX ================= -->
+<div class="view" id="v-matrix">
+  <div class="page-hdr">
+    <div>
+      <h1 class="page-t">Matice dovedností</h1>
+      <div class="page-sub">Vyber projekt — klikni na čtverec pro změnu úrovně operátora (0 → 4)</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn sm no-print" onclick="document.getElementById('impMatrix2').click()">Import matice (.xlsx)</button>
+      <input type="file" id="impMatrix2" accept=".xlsx,.xls" style="display:none" onchange="importMatrix(this)">
+      <button class="btn sec sm no-print" onclick="go('set')">+ Přidat operátory</button>
+    </div>
+  </div>
+  <div class="matrix-tools no-print">
+    <select id="mxArea" onchange="setMxArea(this.value)" style="font-weight:600;min-width:200px"></select>
+    <input type="text" id="mxFilter" placeholder="Hledat operátora…" oninput="renderMatrix()" style="min-width:180px">
+  </div>
+  <div class="legend-bar">
+    <span class="legend-item"><span class="quad sm" data-l="0"><i></i><i></i><i></i><i></i></span> 0 · nezaškolený</span>
+    <span class="legend-item"><span class="quad sm" data-l="1"><i></i><i></i><i></i><i></i></span> 1 · pod dohledem</span>
+    <span class="legend-item"><span class="quad sm" data-l="2"><i></i><i></i><i></i><i></i></span> 2 · samostatný</span>
+    <span class="legend-item"><span class="quad sm" data-l="3"><i></i><i></i><i></i><i></i></span> 3 · plná efektivita</span>
+    <span class="legend-item"><span class="quad sm" data-l="4"><i></i><i></i><i></i><i></i></span> 4 · odborník / školí</span>
+  </div>
+  <div id="matrixBody"></div>
+</div>
+
+<!-- ================= PLAN ================= -->
+<div class="view" id="v-plan">
+  <div class="page-hdr">
+    <div>
+      <h1 class="page-t">Týdenní plán směn</h1>
+      <div class="page-sub">Rozpis směn dle projektu — Ranní / Odpolední / Noční, kvalifikace se kontroluje proti matici</div>
+    </div>
+  </div>
+  <div class="plan-tools no-print">
+    <div class="week-nav">
+      <button onclick="weekShift(-1)">‹</button>
+      <span class="week-lbl" id="weekLbl"></span>
+      <button onclick="weekShift(1)">›</button>
+    </div>
+    <select id="planArea" onchange="setPlanArea(this.value)" style="font-weight:600;min-width:200px"></select>
+    <button class="btn sec sm" onclick="copyPrevWeek()">Kopírovat minulý týden</button>
+    <button class="btn sm" onclick="window.print()">Tisk pro TL</button>
+  </div>
+  <div id="planBody"></div>
+</div>
+
+<!-- ================= SETTINGS ================= -->
+<div class="view" id="v-set">
+  <div class="page-hdr">
+    <div>
+      <h1 class="page-t">Nastavení</h1>
+      <div class="page-sub">Operátoři, projekty a jejich pozice, záloha dat</div>
+    </div>
+  </div>
+  <div class="set-grid">
+    <div class="card card-pad">
+      <div class="sec-title">Operátoři</div>
+      <div class="add-row">
+        <input type="text" id="newOpName" placeholder="Jméno operátora" onkeydown="if(event.key==='Enter')addOperator()">
+        <button class="btn sm" onclick="addOperator()">Přidat</button>
+      </div>
+      <textarea class="bulk" id="bulkOps" placeholder="Hromadné vložení — jedno jméno na řádek (zkopíruj sloupec z Excelu)"></textarea>
+      <button class="btn sec sm" style="margin-top:8px" onclick="bulkAdd()">Vložit seznam</button>
+      <div class="tag-list" id="opTags"></div>
+    </div>
+    <div>
+      <div class="card card-pad" style="margin-bottom:14px">
+        <div class="sec-title">Projekty a jejich pozice</div>
+        <div class="add-row">
+          <input type="text" id="newArea" placeholder="Název projektu" onkeydown="if(event.key==='Enter')addArea()">
+          <button class="btn sm" onclick="addArea()">Přidat projekt</button>
+        </div>
+        <div id="areaList" style="margin-top:14px"></div>
+      </div>
+      <div class="card card-pad">
+        <div class="sec-title">Data</div>
+        <p class="hint">Data jsou uložena v tomto prohlížeči. Pro sdílení nebo zálohu použij export — soubor pak druhá osoba importuje.</p>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn sm" onclick="document.getElementById('impMatrix').click()">Import oficiální skill matrix (.xlsx)</button>
+          <input type="file" id="impMatrix" accept=".xlsx,.xls" style="display:none" onchange="importMatrix(this)">
+          <button class="btn sm sec" onclick="exportData()">Export zálohy (.json)</button>
+          <button class="btn sec sm" onclick="document.getElementById('impFile').click()">Import zálohy</button>
+          <input type="file" id="impFile" accept=".json" style="display:none" onchange="importData(this)">
+          <button class="btn warn-b sm" onclick="resetAll()">Smazat vše</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
