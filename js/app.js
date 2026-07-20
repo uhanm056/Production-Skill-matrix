@@ -645,7 +645,15 @@ function parseOfficialMatrix(wb){
 
   wb.SheetNames.forEach(sn=>{
     const ws = wb.Sheets[sn];
-    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    // normalizace rozsahu: list může mít !ref např. B2:DD223 — bez normalizace
+    // by se sloupce posunuly (r[1] by nebylo „Jméno" ve sl. B). Čteme vždy od A1.
+    let opts = {header:1, defval:null};
+    if(ws['!ref']){
+      const rng = XLSX.utils.decode_range(ws['!ref']);
+      rng.s.r = 0; rng.s.c = 0;
+      opts.range = rng;
+    }
+    const rows = XLSX.utils.sheet_to_json(ws, opts);
     if(rows.length<10) return;
 
     // 1) najdi header řádek: col1 začíná "Jméno"
@@ -720,6 +728,47 @@ function parseOfficialMatrix(wb){
   return {procName: procName||'Nový proces', stations, employees:[...employees.values()]};
 }
 
+/* case-insensitive klíč pro párování pozic */
+function posNorm(s){ return normName(s).toLowerCase(); }
+
+/* nese pozice v projektu nějaká data? (kvalifikace operátorů nebo přiřazení v rozpisech) */
+function positionHasData(projId, pos){
+  const kk = skillKey(projId, pos);
+  if(DB.operators.some(o=>o.skills && o.skills[kk]>0)) return true;
+  return Object.values(DB.plans||{}).some(w=>{
+    const pr = w[projId]; if(!pr || !pr[pos]) return false;
+    return PLAN_SHIFTS.some(s=>(pr[pos][s.id]||[]).length>0);
+  });
+}
+
+/* přesun kvalifikací i přiřazení ze staré pozice na novou (oficiální pravopis) */
+function migratePositionData(projId, oldPos, newPos){
+  if(oldPos===newPos) return;
+  const ok = skillKey(projId, oldPos), nk = skillKey(projId, newPos);
+  DB.operators.forEach(o=>{
+    if(o.skills && ok in o.skills){
+      o.skills[nk] = Math.max(o.skills[nk]||0, o.skills[ok]);
+      delete o.skills[ok];
+    }
+  });
+  Object.values(DB.plans||{}).forEach(w=>{
+    const pr = w[projId]; if(!pr || !(oldPos in pr)) return;
+    if(!(newPos in pr)){ pr[newPos]=pr[oldPos]; }
+    else PLAN_SHIFTS.forEach(s=>{
+      const a = pr[newPos][s.id]||[], b = pr[oldPos][s.id]||[];
+      pr[newPos][s.id] = [...new Set([...a,...b])];
+    });
+    delete pr[oldPos];
+  });
+}
+
+/* odstranění dat pozice (kvalifikace + přiřazení) */
+function removePositionData(projId, pos){
+  const kk = skillKey(projId, pos);
+  DB.operators.forEach(o=>{ if(o.skills) delete o.skills[kk]; });
+  Object.values(DB.plans||{}).forEach(w=>{ if(w[projId]) delete w[projId][pos]; });
+}
+
 function applyMatrixImport(res){
   // 1) najdi / vytvoř projekt
   const pn = res.procName.toLowerCase();
@@ -734,14 +783,37 @@ function applyMatrixImport(res){
     projCreated = true;
   }
 
-  // 2) doplň pozice
-  let posAdded = 0;
+  // 2) oficiální matice = zdroj pravdy pro pozice.
+  //    Sestav cílový seznam: TL, TR + pracoviště z matice (pravopis z matice).
+  const officialPos = [];
+  const officialByNorm = new Map();
+  ['TL','TR'].forEach(p=>{ officialPos.push(p); officialByNorm.set(posNorm(p), p); });
   res.stations.forEach(st=>{
     const stU = RENAME_MAP[st]||st;
-    if(!proj.positions.includes(stU)){ proj.positions.push(stU); posAdded++; }
+    const k = posNorm(stU);
+    if(!officialByNorm.has(k)){ officialPos.push(stU); officialByNorm.set(k, stU); }
   });
 
-  // 3) operátoři + kvalifikace
+  // 2b) slaď původní pozice projektu s oficiální maticí
+  let posMigrated = 0, posRemoved = 0;
+  const posKept = [];
+  proj.positions.forEach(oldPos=>{
+    const match = officialByNorm.get(posNorm(oldPos));
+    if(match){
+      // case-insensitive shoda → přemigruj data na oficiální pravopis
+      if(match!==oldPos){ migratePositionData(proj.id, oldPos, match); posMigrated++; }
+    } else if(positionHasData(proj.id, oldPos)){
+      // bez shody, ale nese data → ponech na konci
+      posKept.push(oldPos);
+    } else {
+      // bez shody a bez dat → odstraň
+      removePositionData(proj.id, oldPos);
+      posRemoved++;
+    }
+  });
+  proj.positions = officialPos.concat(posKept);
+
+  // 3) operátoři + kvalifikace (oficiální hodnoty přepisují — zdroj pravdy)
   const byName = new Map(DB.operators.map(o=>[normName(o.name).toLowerCase(), o]));
   let opsNew = 0, skillsSet = 0;
   res.employees.forEach(emp=>{
@@ -764,7 +836,15 @@ function applyMatrixImport(res){
   save();
   mxProj = proj.id;
   render();
-  toast(`Import: ${proj.name}${projCreated?' (nový projekt)':''} · ${res.stations.length} pozic${posAdded?` (+${posAdded})`:''} · ${res.employees.length} operátorů (${opsNew} nových) · ${skillsSet} kvalifikací`);
+  let msg = `Import: ${proj.name}${projCreated?' (nový projekt)':''} · ${res.stations.length} pozic`;
+  const chg = [];
+  if(posMigrated) chg.push(`${posMigrated} přejmenováno`);
+  if(posRemoved) chg.push(`${posRemoved} odstraněno`);
+  if(posKept.length) chg.push(`${posKept.length} ponecháno`);
+  if(chg.length) msg += ` (${chg.join(', ')})`;
+  msg += ` · ${res.employees.length} operátorů (${opsNew} nových) · ${skillsSet} kvalifikací`;
+  if(posKept.length) msg += ` · ⚠ Mimo oficiální matici (nesou data): ${posKept.join(', ')}`;
+  toast(msg);
 }
 
 /* ============ TOAST ============ */
