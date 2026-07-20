@@ -32,6 +32,37 @@ const RENAME_MAP = {
   'Us.Wel':'US Welding', 'Usw1':'US Welding 1', 'Usw2':'US Welding 2',
   'RW':'Rework', 'PNCH':'Punching', 'Fleece + PNCH':'Fleece + Punching'
 };
+
+/* Oficiální pozice G463 (zdroj pravdy — šablona skill matrix) */
+const G463_OFFICIAL = ['SKLAD','SEQ PREASSY','PREASSY RR','PREASSY FRT','SVÁŘEČKA',
+  'ASSEMBLY RR','ASSEMBLY FRT','REWORK','ANTISQEEK','HB PREASSY','HB KONTROLA','3CON','ROLLCOATER TPO'];
+
+/* Jednorázová migrace: sladí uložené pozice G463 s oficiální maticí.
+   Staré pozice z rozpisu (Sklad, Sequence, Cobot…) se odstraní, pokud nenesou
+   data; případná case-insensitive duplicita (Sklad vs SKLAD) se přemigruje na
+   oficiální pravopis. Pozice s daty bez oficiální shody zůstanou na konci. */
+function migrateG463Positions(db){
+  if(db.migrations && db.migrations.g463Positions) return db;
+  const proj = (db.projects||[]).find(p=>p.id==='g463');
+  if(proj){
+    const target = [], byNorm = new Map();
+    ['TL','TR'].forEach(p=>{ target.push(p); byNorm.set(posNorm(p), p); });
+    G463_OFFICIAL.forEach(st=>{ const k=posNorm(st); if(!byNorm.has(k)){ target.push(st); byNorm.set(k, st); } });
+
+    const kept = [];
+    proj.positions.forEach(oldPos=>{
+      const match = byNorm.get(posNorm(oldPos));
+      if(match){ if(match!==oldPos) migratePositionData(db, 'g463', oldPos, match); }
+      else if(positionHasData(db, 'g463', oldPos)) kept.push(oldPos);
+      else removePositionData(db, 'g463', oldPos);
+    });
+    proj.positions = target.concat(kept);
+  }
+  if(!db.migrations) db.migrations = {};
+  db.migrations.g463Positions = true;
+  return db;
+}
+
 function migrateNames(db){
   db.projects.forEach(pr=>{
     pr.positions = pr.positions.map(p=>RENAME_MAP[p]||p);
@@ -51,6 +82,7 @@ function migrateNames(db){
       if(np && !pr[np]){ pr[np]=pr[pos]; delete pr[pos]; }
     });
   }));
+  migrateG463Positions(db);
   return db;
 }
 
@@ -59,6 +91,7 @@ let mxProj = DB.projects[0] ? DB.projects[0].id : null;
 let planProj = DB.projects[0] ? DB.projects[0].id : null;
 let weekOffset = 0;
 let pickerEl = null;
+let mxShowAll = false;   // matice: false = jen operátoři s kvalifikací, true = celý pool
 
 function load(){
   try{
@@ -123,6 +156,7 @@ function buildProjSelect(elId, current){
   ).join('');
 }
 function setMxArea(a){ mxProj=a; render(); }
+function setMxShowAll(v){ mxShowAll=!!v; renderMatrix(); }
 function setPlanArea(a){ planProj=a; closePicker(); render(); }
 
 /* ============ SKILL HELPERS ============ */
@@ -247,7 +281,18 @@ function renderMatrix(){
 
   const filterEl = document.getElementById('mxFilter');
   const filter = filterEl ? filterEl.value.trim().toLowerCase() : '';
+
+  // operátor má na projektu kvalifikaci, pokud má úroveň ≥1 na některé pozici
+  const hasQual = op => proj.positions.some(pos=>skillOf(op,proj.id,pos)>=1);
+  const poolCount = DB.operators.length;
+  const qualifiedCount = DB.operators.filter(hasQual).length;
+
+  // sync přepínače (mohl se překreslit)
+  const toggleEl = document.getElementById('mxShowAll');
+  if(toggleEl) toggleEl.checked = mxShowAll;
+
   let ops = allOps();
+  if(!mxShowAll) ops = ops.filter(hasQual);   // výchozí: jen s kvalifikací
   if(filter) ops = ops.filter(o=>o.name.toLowerCase().includes(filter));
 
   if(DB.operators.length===0){
@@ -269,7 +314,18 @@ function renderMatrix(){
     return;
   }
 
-  let h=`<div class="matrix-wrap"><table class="mx"><thead><tr><th>Operátor</th>`;
+  const countHdr = `<div class="mx-count">${proj.name} — <b>${qualifiedCount}</b> operátorů s kvalifikací / ${poolCount} v poolu</div>`;
+
+  if(ops.length===0 && !mxShowAll && !filter){
+    el.innerHTML = countHdr + `<div class="card"><div class="empty">
+      ${quadHtml(0,'lg')}
+      <h3>Žádný operátor nemá kvalifikaci na ${proj.name}</h3>
+      <p>Zapni „Zobrazit všechny operátory" a přiřaď kvalifikace z poolu.</p>
+    </div></div>`;
+    return;
+  }
+
+  let h=countHdr+`<div class="matrix-wrap"><table class="mx"><thead><tr><th>Operátor</th>`;
   proj.positions.forEach(pos=>h+=`<th>${pos}</th>`);
   h+=`<th>Ø</th><th></th></tr></thead><tbody>`;
 
@@ -732,26 +788,26 @@ function parseOfficialMatrix(wb){
 function posNorm(s){ return normName(s).toLowerCase(); }
 
 /* nese pozice v projektu nějaká data? (kvalifikace operátorů nebo přiřazení v rozpisech) */
-function positionHasData(projId, pos){
+function positionHasData(db, projId, pos){
   const kk = skillKey(projId, pos);
-  if(DB.operators.some(o=>o.skills && o.skills[kk]>0)) return true;
-  return Object.values(DB.plans||{}).some(w=>{
+  if((db.operators||[]).some(o=>o.skills && o.skills[kk]>0)) return true;
+  return Object.values(db.plans||{}).some(w=>{
     const pr = w[projId]; if(!pr || !pr[pos]) return false;
     return PLAN_SHIFTS.some(s=>(pr[pos][s.id]||[]).length>0);
   });
 }
 
 /* přesun kvalifikací i přiřazení ze staré pozice na novou (oficiální pravopis) */
-function migratePositionData(projId, oldPos, newPos){
+function migratePositionData(db, projId, oldPos, newPos){
   if(oldPos===newPos) return;
   const ok = skillKey(projId, oldPos), nk = skillKey(projId, newPos);
-  DB.operators.forEach(o=>{
+  (db.operators||[]).forEach(o=>{
     if(o.skills && ok in o.skills){
       o.skills[nk] = Math.max(o.skills[nk]||0, o.skills[ok]);
       delete o.skills[ok];
     }
   });
-  Object.values(DB.plans||{}).forEach(w=>{
+  Object.values(db.plans||{}).forEach(w=>{
     const pr = w[projId]; if(!pr || !(oldPos in pr)) return;
     if(!(newPos in pr)){ pr[newPos]=pr[oldPos]; }
     else PLAN_SHIFTS.forEach(s=>{
@@ -763,10 +819,10 @@ function migratePositionData(projId, oldPos, newPos){
 }
 
 /* odstranění dat pozice (kvalifikace + přiřazení) */
-function removePositionData(projId, pos){
+function removePositionData(db, projId, pos){
   const kk = skillKey(projId, pos);
-  DB.operators.forEach(o=>{ if(o.skills) delete o.skills[kk]; });
-  Object.values(DB.plans||{}).forEach(w=>{ if(w[projId]) delete w[projId][pos]; });
+  (db.operators||[]).forEach(o=>{ if(o.skills) delete o.skills[kk]; });
+  Object.values(db.plans||{}).forEach(w=>{ if(w[projId]) delete w[projId][pos]; });
 }
 
 function applyMatrixImport(res){
@@ -801,13 +857,13 @@ function applyMatrixImport(res){
     const match = officialByNorm.get(posNorm(oldPos));
     if(match){
       // case-insensitive shoda → přemigruj data na oficiální pravopis
-      if(match!==oldPos){ migratePositionData(proj.id, oldPos, match); posMigrated++; }
-    } else if(positionHasData(proj.id, oldPos)){
+      if(match!==oldPos){ migratePositionData(DB, proj.id, oldPos, match); posMigrated++; }
+    } else if(positionHasData(DB, proj.id, oldPos)){
       // bez shody, ale nese data → ponech na konci
       posKept.push(oldPos);
     } else {
       // bez shody a bez dat → odstraň
-      removePositionData(proj.id, oldPos);
+      removePositionData(DB, proj.id, oldPos);
       posRemoved++;
     }
   });

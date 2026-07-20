@@ -54,6 +54,7 @@
   <div class="matrix-tools no-print">
     <select id="mxArea" onchange="setMxArea(this.value)" style="font-weight:600;min-width:200px"></select>
     <input type="text" id="mxFilter" placeholder="Hledat operátora…" oninput="renderMatrix()" style="min-width:180px">
+    <label class="mx-toggle"><input type="checkbox" id="mxShowAll" onchange="setMxShowAll(this.checked)"> Zobrazit všechny operátory</label>
   </div>
   <div class="legend-bar">
     <span class="legend-item"><span class="quad sm" data-l="0"><i></i><i></i><i></i><i></i></span> 0 · nezaškolený</span>
