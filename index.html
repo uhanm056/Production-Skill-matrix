@@ -105,6 +105,10 @@
       <textarea class="bulk" id="bulkOps" placeholder="Hromadné vložení — jedno jméno na řádek (zkopíruj sloupec z Excelu)"></textarea>
       <button class="btn sec sm" style="margin-top:8px" onclick="bulkAdd()">Vložit seznam</button>
       <div class="tag-list" id="opTags"></div>
+      <details class="ended-wrap" id="endedWrap" style="display:none">
+        <summary>Ukončení operátoři <span id="endedCount" class="ended-count"></span></summary>
+        <div class="tag-list" id="endedTags"></div>
+      </details>
     </div>
     <div>
       <div class="card card-pad" style="margin-bottom:14px">

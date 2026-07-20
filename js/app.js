@@ -68,6 +68,7 @@ function migrateNames(db){
     pr.positions = pr.positions.map(p=>RENAME_MAP[p]||p);
   });
   db.operators.forEach(o=>{
+    if(o.active===undefined) o.active = true;   // zpětná kompat.: staří operátoři jsou aktivní
     if(!o.skills) return;
     const ns = {};
     Object.keys(o.skills).forEach(k=>{
@@ -162,6 +163,10 @@ function setPlanArea(a){ planProj=a; closePicker(); render(); }
 /* ============ SKILL HELPERS ============ */
 function skillOf(op, projId, pos){ return (op.skills&&op.skills[skillKey(projId,pos)])||0; }
 function allOps(){ return [...DB.operators].sort((a,b)=>a.name.localeCompare(b.name,'cs')); }
+function isActive(op){ return op.active !== false; }        // undefined = aktivní (zpětná kompat.)
+function activeOps(){ return allOps().filter(isActive); }   // pracující pool
+function endedOps(){ return allOps().filter(o=>!isActive(o)); }
+function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
 function quadHtml(level, cls){
   return `<span class="quad ${cls||''}" data-l="${level}"><i></i><i></i><i></i><i></i></span>`;
@@ -170,6 +175,7 @@ function quadHtml(level, cls){
 function coverage(projId, pos){
   let tr=0, it=0;
   DB.operators.forEach(o=>{
+    if(!isActive(o)) return;   // neaktivní se nepočítají do pokrytí ani rizik
     const l = skillOf(o,projId,pos);
     if(l>=2) tr++;
     else if(l===1) it++;
@@ -226,8 +232,8 @@ function renderDash(){
     </div>
     <div class="kpi-card">
       <div class="kpi-lbl">Operátorů celkem</div>
-      <div class="kpi-num">${DB.operators.length}</div>
-      <div class="kpi-sub">jeden společný pool</div>
+      <div class="kpi-num">${activeOps().length}</div>
+      <div class="kpi-sub">jeden společný pool${endedOps().length?` · ${endedOps().length} ukončených`:''}</div>
     </div>
     <div class="kpi-card a-warn">
       <div class="kpi-lbl">V zaškolování</div>
@@ -284,14 +290,15 @@ function renderMatrix(){
 
   // operátor má na projektu kvalifikaci, pokud má úroveň ≥1 na některé pozici
   const hasQual = op => proj.positions.some(pos=>skillOf(op,proj.id,pos)>=1);
-  const poolCount = DB.operators.length;
-  const qualifiedCount = DB.operators.filter(hasQual).length;
+  const pool = activeOps();   // neaktivní (ukončení) se v matici nezobrazují
+  const poolCount = pool.length;
+  const qualifiedCount = pool.filter(hasQual).length;
 
   // sync přepínače (mohl se překreslit)
   const toggleEl = document.getElementById('mxShowAll');
   if(toggleEl) toggleEl.checked = mxShowAll;
 
-  let ops = allOps();
+  let ops = pool;
   if(!mxShowAll) ops = ops.filter(hasQual);   // výchozí: jen s kvalifikací
   if(filter) ops = ops.filter(o=>o.name.toLowerCase().includes(filter));
 
@@ -409,10 +416,12 @@ function renderPlan(){
         const op = DB.operators.find(o=>o.id===opId);
         if(!op){return;}
         const l = skillOf(op,proj.id,pos);
-        const cls = l===0?'lvl0':l===1?'lvl1':'';
-        h+=`<div class="p-chip ${cls}" title="${op.name} · úroveň ${l}${l===0?' — NENÍ ZAŠKOLEN':l===1?' — pouze pod dohledem':''}">
+        const ended = !isActive(op);
+        const cls = ended?'p-ended':l===0?'lvl0':l===1?'lvl1':'';
+        const endNote = ended?` — ukončen${op.endDate?' '+op.endDate:''}`:'';
+        h+=`<div class="p-chip ${cls}" title="${op.name} · úroveň ${l}${ended?endNote:(l===0?' — NENÍ ZAŠKOLEN':l===1?' — pouze pod dohledem':'')}">
           ${quadHtml(l,'sm')}
-          <span>${op.name}</span>
+          <span>${op.name}${ended?' <small class="p-ended-tag">ukončen</small>':''}</span>
           <button class="x" onclick="unassign('${wk}','${pos.replace(/'/g,"\\'")}','${s.id}','${opId}')">✕</button>
         </div>`;
       });
@@ -454,7 +463,7 @@ function weekShift(dir){ weekOffset+=dir; closePicker(); renderPlan(); }
 function openPicker(ev, wk, pos, shiftId){
   closePicker();
   const proj = projById(planProj);
-  const ops = allOps();
+  const ops = activeOps();   // ukončení operátoři se v pickeru nenabízejí
   const planPos = (DB.plans[wk][proj.id]||{})[pos];
   const assignedArr = (planPos&&planPos[shiftId])||[];
 
@@ -537,10 +546,23 @@ function copyPrevWeek(){
 
 /* ============ RENDER: SETTINGS ============ */
 function renderSet(){
-  const ops = allOps();
+  const ops = activeOps();
   document.getElementById('opTags').innerHTML = ops.length
-    ? ops.map(o=>`<span class="tag">${o.name}<button onclick="delOperator('${o.id}')" title="Odebrat">✕</button></span>`).join('')
-    : `<span class="hint">Zatím žádní operátoři. Nejrychlejší je hromadné vložení — zkopíruj sloupec jmen z Excelu.</span>`;
+    ? ops.map(o=>`<span class="tag">${o.name}<button class="tag-end" onclick="endOperator('${o.id}')" title="Ukončit — odchod ze závodu">Ukončit</button><button onclick="delOperator('${o.id}')" title="Smazat natrvalo (omyl / duplicita)">✕</button></span>`).join('')
+    : `<span class="hint">Zatím žádní aktivní operátoři. Nejrychlejší je hromadné vložení — zkopíruj sloupec jmen z Excelu.</span>`;
+
+  // sekce Ukončení operátoři
+  const ended = endedOps();
+  const endedWrap = document.getElementById('endedWrap');
+  if(endedWrap){
+    endedWrap.style.display = ended.length ? '' : 'none';
+    const cnt = document.getElementById('endedCount');
+    if(cnt) cnt.textContent = ended.length ? `(${ended.length})` : '';
+    const et = document.getElementById('endedTags');
+    if(et) et.innerHTML = ended.map(o=>
+      `<span class="tag tag-ended">${o.name}<small class="tag-date">ukončen ${o.endDate||'—'}</small><button class="tag-restore" onclick="restoreOperator('${o.id}')" title="Obnovit — návrat do poolu">Obnovit</button></span>`
+    ).join('');
+  }
 
   const el = document.getElementById('areaList');
   el.innerHTML = DB.projects.map(a=>`
@@ -564,7 +586,7 @@ function addOperator(){
   const inp = document.getElementById('newOpName');
   const name = inp.value.trim();
   if(!name) return;
-  DB.operators.push({id:uid(), name, skills:{}});
+  DB.operators.push({id:uid(), name, skills:{}, active:true});
   inp.value='';
   save(); renderSet();
 }
@@ -576,7 +598,7 @@ function bulkAdd(){
   let added=0, skipped=0;
   names.forEach(name=>{
     if(existing.has(name.toLowerCase())){ skipped++; return; }
-    DB.operators.push({id:uid(), name, skills:{}});
+    DB.operators.push({id:uid(), name, skills:{}, active:true});
     existing.add(name.toLowerCase());
     added++;
   });
@@ -587,12 +609,29 @@ function bulkAdd(){
 function delOperator(id){
   const op = DB.operators.find(o=>o.id===id);
   if(!op) return;
-  if(!confirm(`Odebrat operátora ${op.name}? Odstraní se i jeho kvalifikace a přiřazení v rozpisech.`)) return;
+  if(!confirm(`Smazat operátora ${op.name} NATRVALO? Odstraní se i jeho kvalifikace a přiřazení v rozpisech.\n\n(Pro běžný odchod ze závodu použij „Ukončit" — data zůstanou zachována.)`)) return;
   DB.operators = DB.operators.filter(o=>o.id!==id);
   Object.values(DB.plans).forEach(w=>Object.values(w).forEach(pr=>Object.values(pr).forEach(posObj=>{
     Object.keys(posObj).forEach(sh=>{ posObj[sh]=posObj[sh].filter(x=>x!==id); });
   })));
   save(); render();
+}
+function endOperator(id){
+  const op = DB.operators.find(o=>o.id===id);
+  if(!op) return;
+  if(!confirm(`Ukončit operátora ${op.name}? Přesune se mezi ukončené — zmizí z matice, pickeru rozpisu i výpočtu pokrytí. V historických rozpisech zůstane viditelný, kvalifikace se zachovají.`)) return;
+  op.active = false;
+  op.endDate = todayISO();
+  save(); render();
+  toast(`${op.name} ukončen (${op.endDate})`);
+}
+function restoreOperator(id){
+  const op = DB.operators.find(o=>o.id===id);
+  if(!op) return;
+  op.active = true;
+  delete op.endDate;
+  save(); render();
+  toast(`${op.name} obnoven — zpět v poolu`);
 }
 function addArea(){
   const inp = document.getElementById('newArea');
@@ -871,15 +910,20 @@ function applyMatrixImport(res){
 
   // 3) operátoři + kvalifikace (oficiální hodnoty přepisují — zdroj pravdy)
   const byName = new Map(DB.operators.map(o=>[normName(o.name).toLowerCase(), o]));
-  let opsNew = 0, skillsSet = 0;
+  let opsNew = 0, skillsSet = 0, opsReactivated = 0;
   res.employees.forEach(emp=>{
     const key = normName(emp.name).toLowerCase();
     let op = byName.get(key);
     if(!op){
-      op = {id:uid(), name:emp.name, skills:{}};
+      op = {id:uid(), name:emp.name, skills:{}, active:true};
       DB.operators.push(op);
       byName.set(key, op);
       opsNew++;
+    } else if(!isActive(op)){
+      // v matici by nebyl, kdyby nepracoval → reaktivuj (např. agenturní návrat)
+      op.active = true;
+      delete op.endDate;
+      opsReactivated++;
     }
     if(!op.skills) op.skills={};
     Object.entries(emp.skills).forEach(([st,lvl])=>{
@@ -898,7 +942,7 @@ function applyMatrixImport(res){
   if(posRemoved) chg.push(`${posRemoved} odstraněno`);
   if(posKept.length) chg.push(`${posKept.length} ponecháno`);
   if(chg.length) msg += ` (${chg.join(', ')})`;
-  msg += ` · ${res.employees.length} operátorů (${opsNew} nových) · ${skillsSet} kvalifikací`;
+  msg += ` · ${res.employees.length} operátorů (${opsNew} nových${opsReactivated?`, ${opsReactivated} reaktivováno`:''}) · ${skillsSet} kvalifikací`;
   if(posKept.length) msg += ` · ⚠ Mimo oficiální matici (nesou data): ${posKept.join(', ')}`;
   toast(msg);
 }

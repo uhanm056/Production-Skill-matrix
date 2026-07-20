@@ -168,6 +168,18 @@ select:focus,input:focus,textarea:focus{border-color:var(--navy)}
 .tag{background:var(--line2);border-radius:6px;padding:5px 10px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px}
 .tag button{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:13px;padding:0}
 .tag button:hover{color:var(--risk)}
+.tag .tag-end{font-size:11px;font-weight:700;color:var(--ink3);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.tag .tag-end:hover{color:var(--navy);border-color:var(--navy)}
+.tag-ended{background:#EFF1F4;color:var(--ink3)}
+.tag-ended .tag-date{font-weight:500;color:var(--ink3);font-size:11px}
+.tag .tag-restore{font-size:11px;font-weight:700;color:var(--navy);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.tag .tag-restore:hover{color:#fff;background:var(--navy);border-color:var(--navy)}
+.ended-wrap{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+.ended-wrap summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--ink2);user-select:none}
+.ended-wrap .ended-count{color:var(--ink3);font-weight:600}
+/* ukončený operátor v historickém rozpisu */
+.p-chip.p-ended{opacity:.55;filter:grayscale(1)}
+.p-ended-tag{font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
 .add-row{display:flex;gap:8px;margin-top:12px}
 .add-row input{flex:1}
 textarea.bulk{width:100%;min-height:110px;margin-top:10px;resize:vertical;font-size:13px}
