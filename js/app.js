@@ -402,7 +402,16 @@ function renderPlan(){
   const plan = DB.plans[wk][proj.id];
   if(!DB.notes[wk]) DB.notes[wk]={};
 
-  let h=`<div class="plan-wrap"><table class="plan-t"><thead><tr><th>${proj.name} — CW ${isoWeek(mon)}</th>`;
+  // tisková hlavička (jen pro tisk / PDF pro TL)
+  let h=`<div class="print-head">
+    <div class="ph-brand">SkillPlan · Yanfeng Automotive Interiors — Planá nad Lužnicí</div>
+    <div class="ph-row">
+      <span class="ph-title">${proj.name} — Rozpis směn</span>
+      <span class="ph-cw">CW ${isoWeek(mon)} · ${fmtD(mon)} – ${fmtD(sun)}</span>
+    </div>
+    <div class="ph-sub">Vytištěno ${todayISO()}</div>
+  </div>`;
+  h+=`<div class="plan-wrap"><table class="plan-t"><thead><tr><th>${proj.name} — CW ${isoWeek(mon)}</th>`;
   PLAN_SHIFTS.forEach(s=>h+=`<th style="min-width:220px">${s.name}</th>`);
   h+=`</tr></thead><tbody>`;
 
@@ -446,8 +455,13 @@ function renderPlan(){
     <div class="sec-title">Dovolená · Nemoc · Poznámky (CW ${isoWeek(mon)})</div>
     <textarea class="bulk" style="min-height:70px;margin-top:0" placeholder="Např.: Novák Jan — dovolená 14.–18.7. · Svobodová — nemoc"
       onchange="saveNote('${wk}','${proj.id}',this.value)">${noteVal}</textarea>
+    <div class="note-print">${noteVal || '—'}</div>
   </div>
-  <p class="hint no-print" style="margin-top:10px">Zelená = pokryto samostatným operátorem · oranžová = jen operátor pod dohledem · červená = přiřazen nezaškolený. „Tisk pro TL" vytiskne aktuální projekt a týden.</p>`;
+  <div class="print-legend">
+    Úrovně kvalifikace: <b>0</b> nezaškolen · <b>1</b> pod dohledem · <b>2</b> samostatný · <b>3</b> plná efektivita · <b>4</b> odborník &nbsp;|&nbsp;
+    ✓ pokryto samostatným operátorem · jen dohled = jen operátor pod dohledem · ⚠ nezaškolen = přiřazen nezaškolený
+  </div>
+  <p class="hint no-print" style="margin-top:10px">Zelená = pokryto samostatným operátorem · oranžová = jen operátor pod dohledem · červená = přiřazen nezaškolený. „PDF pro TL" otevře tiskový dialog — vyber „Uložit jako PDF".</p>`;
   el.innerHTML = h;
 }
 
@@ -459,6 +473,15 @@ function saveNote(wk, projId, val){
 }
 
 function weekShift(dir){ weekOffset+=dir; closePicker(); renderPlan(); }
+
+/* Export rozpisu pro TL — otevře tiskový dialog (Uložit jako PDF).
+   Zajistí aktivní záložku Plán a zavře picker, ať se netiskne. */
+function printPlan(){
+  closePicker();
+  if(!document.getElementById('v-plan').classList.contains('on')) go('plan');
+  else renderPlan();
+  setTimeout(()=>window.print(), 60);
+}
 
 function openPicker(ev, wk, pos, shiftId){
   closePicker();

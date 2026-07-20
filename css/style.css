@@ -196,13 +196,45 @@ textarea.bulk{width:100%;min-height:110px;margin-top:10px;resize:vertical;font-s
 .empty p{font-size:13px;max-width:380px;margin:0 auto 18px}
 
 /* ============ PRINT ============ */
+/* prvky jen pro tisk (skryté na obrazovce) */
+.print-head,.note-print,.print-legend{display:none}
+
+@page{ size:A4 landscape; margin:11mm; }
 @media print{
-  .appbar,.plan-tools,.matrix-tools,.legend-bar .btn,.p-add,.p-chip .x,.no-print{display:none!important}
+  .appbar,.plan-tools,.matrix-tools,.legend-bar .btn,.p-add,.p-chip .x,.page-hdr,.no-print{display:none!important}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
   body{background:#fff}
   .main{padding:0;max-width:none}
-  .card,.plan-wrap,.matrix-wrap{box-shadow:none;border:1px solid #ccc}
   .view{display:none!important}
   .view.on{display:block!important}
+  .card,.plan-wrap,.matrix-wrap{box-shadow:none;border:1px solid #ccc}
+
+  /* tisková hlavička rozpisu */
+  .print-head{display:block!important;margin-bottom:8px;border-bottom:2px solid var(--navy);padding-bottom:6px}
+  .print-head .ph-brand{font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.05em}
+  .print-head .ph-row{display:flex;justify-content:space-between;align-items:baseline;margin-top:2px}
+  .print-head .ph-title{font-size:17px;font-weight:800;color:var(--ink)}
+  .print-head .ph-cw{font-size:13px;font-weight:700;color:var(--ink2)}
+  .print-head .ph-sub{font-size:9px;color:var(--ink3);margin-top:1px}
+
+  /* tabulka rozpisu */
+  .plan-t{width:100%;font-size:10.5px;border-collapse:collapse}
+  .plan-t th,.plan-t td{border:1px solid #b4bcc6;padding:4px 6px;vertical-align:top}
+  .plan-t thead th{background:var(--navy)!important;color:#fff!important}
+  .plan-t tbody tr{break-inside:avoid;page-break-inside:avoid}
+  .plan-t tbody td:first-child{font-weight:700;background:#EEF2F6!important;white-space:nowrap}
+  .p-chip{border:1px solid #d5dbe2;padding:2px 5px;margin:2px 0;break-inside:avoid;background:#fff!important}
+  .p-chip.p-ended{opacity:.6}
+  .day-cover{font-size:9px}
+
+  /* poznámky: skryj editační pole, ukaž text */
+  #planBody textarea.bulk{display:none!important}
+  .note-print{display:block!important;font-size:11px;white-space:pre-wrap;min-height:16px}
+  .card-pad{padding:8px 10px}
+
+  /* legenda dole */
+  .print-legend{display:block!important;margin-top:8px;font-size:9px;color:var(--ink2);border-top:1px solid #ccc;padding-top:5px}
+  .print-legend b{color:var(--navy)}
 }
 
 @media(max-width:900px){
