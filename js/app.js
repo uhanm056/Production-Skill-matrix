@@ -84,6 +84,7 @@ function migrateNames(db){
     });
   }));
   migrateG463Positions(db);
+  if(!db.history) db.history={};   // zpětná kompat.: historie trendu
   return db;
 }
 
@@ -106,7 +107,8 @@ function load(){
     projects: JSON.parse(JSON.stringify(DEFAULT_PROJECTS)),
     operators: [],   // {id, name, skills:{ 'projId::position': level }}
     plans: {},       // plans[cwKey][projId][position][shiftId] = [opId,...]
-    notes: {}        // notes[cwKey][projId] = text (dovolená, nemoc, poznámky)
+    notes: {},       // notes[cwKey][projId] = text (dovolená, nemoc, poznámky)
+    history: {}      // history['YYYY-MM'] = snímek připravenosti (trend)
   };
 }
 function save(){
@@ -186,6 +188,30 @@ function pct(tr,tot){ return tot>0?Math.round(tr/tot*100):0; }
 function colOf(v){ return v>=90?'var(--ok)':v>=70?'var(--warn)':'var(--risk)'; }
 function colHex(v){ return v>=90?'#1E7A3C':v>=70?'#B36B00':'#C22E2E'; }
 
+/* ============ HISTORIE / TREND PŘIPRAVENOSTI ============ */
+function monthKey(d){ d=d||new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function monthLabel(mk){ const p=mk.split('-'); return p[1]+'/'+p[0].slice(2); }
+function computeReadiness(){
+  let tr=0,it=0,tot=0; const projects={};
+  DB.projects.forEach(a=>{
+    let ptr=0,pit=0;
+    a.positions.forEach(pos=>{ const c=coverage(a.id,pos); ptr+=c.tr; pit+=c.it; });
+    const ptot=ptr+pit;
+    if(ptot>0) projects[a.id]={name:a.name, tr:ptr, it:pit, tot:ptot};
+    tr+=ptr; it+=pit; tot+=ptot;
+  });
+  return { overall:{tr, it, tot}, projects, ops: activeOps().length };
+}
+/* zapiš/přepiš snímek AKTUÁLNÍHO měsíce; minulé měsíce zůstávají zmražené */
+function captureSnapshot(){
+  if(!DB.history) DB.history={};
+  DB.history[monthKey()] = computeReadiness();
+}
+function saveSnapshot(){
+  captureSnapshot(); save(); renderDash();
+  toast('Snímek připravenosti uložen ('+monthLabel(monthKey())+')');
+}
+
 /* ============ RENDER: DASHBOARD ============ */
 function renderDash(){
   const el = document.getElementById('dashBody');
@@ -261,6 +287,35 @@ function renderDash(){
       </div>`;
     });
     h+=`</div>`;
+  }
+
+  // Trend připravenosti po měsících
+  {
+    const hist = DB.history||{};
+    const cm = monthKey();
+    const liveCM = computeReadiness();
+    const mset = new Set(Object.keys(hist)); mset.add(cm);
+    const months = [...mset].sort().slice(-12);   // posledních 12 měsíců
+    const snapOf = m => (m===cm ? liveCM : hist[m]);
+    h+=`<div class="card card-pad" style="margin-bottom:20px">
+      <div class="sec-title">Trend připravenosti (po měsících)
+        <button class="btn sm sec no-print" style="float:right;margin-top:-4px" onclick="saveSnapshot()">Uložit snímek</button></div>`;
+    if(months.length<2){
+      h+=`<p class="hint">Zaznamenán zatím jen aktuální měsíc (${monthLabel(cm)}). Trend se zobrazí v dalších měsících — snímek se ukládá automaticky při otevření aplikace, nebo tlačítkem „Uložit snímek".</p>`;
+    }
+    h+=`<div class="trend-chart">`;
+    months.forEach((m,i)=>{
+      const s=snapOf(m); const p=pct(s.overall.tr,s.overall.tot);
+      const prev = i>0?snapOf(months[i-1]):null;
+      const d = prev? p-pct(prev.overall.tr,prev.overall.tot) : null;
+      h+=`<div class="trend-col ${m===cm?'cur':''}" title="${monthLabel(m)}: ${s.overall.tot>0?p+'% · '+s.overall.tr+' samostatných z '+s.overall.tot:'bez dat'}">
+        <div class="trend-val" style="color:${s.overall.tot>0?colHex(p):'var(--ink3)'}">${s.overall.tot>0?p+'%':'—'}</div>
+        <div class="trend-bar-wrap"><div class="trend-bar" style="height:${s.overall.tot>0?Math.max(3,p):0}%;background:${s.overall.tot>0?colHex(p):'var(--line)'}"></div></div>
+        <div class="trend-m">${monthLabel(m)}${m===cm?' •':''}</div>
+        <div class="trend-d ${d>0?'up':d<0?'down':''}">${d===null?'':d>0?'▲'+d:d<0?'▼'+Math.abs(d):'–'}</div>
+      </div>`;
+    });
+    h+=`</div></div>`;
   }
 
   h+=`<div class="card card-pad">
@@ -991,5 +1046,6 @@ function render(){
 
 /* ============ INIT ============ */
 document.getElementById('topDate').textContent = new Date().toLocaleDateString('cs-CZ',{day:'numeric',month:'long',year:'numeric'});
+captureSnapshot(); save();   // zaznamenej snímek připravenosti aktuálního měsíce
 render();
 

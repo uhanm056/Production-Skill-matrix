@@ -195,6 +195,18 @@ textarea.bulk{width:100%;min-height:110px;margin-top:10px;resize:vertical;font-s
 .empty h3{font-size:16px;font-weight:700;color:var(--ink2);margin-bottom:6px}
 .empty p{font-size:13px;max-width:380px;margin:0 auto 18px}
 
+/* ============ TREND PŘIPRAVENOSTI ============ */
+.trend-chart{display:flex;align-items:stretch;gap:8px;height:170px;padding:6px 2px 0;overflow-x:auto}
+.trend-col{display:flex;flex-direction:column;align-items:center;min-width:42px;flex:1}
+.trend-val{font-size:11px;font-weight:800;margin-bottom:4px}
+.trend-bar-wrap{width:26px;flex:1;display:flex;align-items:flex-end;background:#F0F3F7;border-radius:5px 5px 0 0}
+.trend-bar{width:100%;border-radius:5px 5px 0 0;min-height:3px}
+.trend-col.cur .trend-bar-wrap{outline:2px solid var(--navy);outline-offset:1px}
+.trend-m{font-size:10px;color:var(--ink2);margin-top:6px;font-weight:600;white-space:nowrap}
+.trend-d{font-size:9.5px;font-weight:700;color:var(--ink3);margin-top:1px;min-height:12px}
+.trend-d.up{color:var(--ok)}
+.trend-d.down{color:var(--risk)}
+
 /* ============ PRINT ============ */
 /* prvky jen pro tisk (skryté na obrazovce) */
 .print-head,.note-print,.print-legend{display:none}
