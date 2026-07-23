@@ -33,33 +33,46 @@ const RENAME_MAP = {
   'RW':'Rework', 'PNCH':'Punching', 'Fleece + PNCH':'Fleece + Punching'
 };
 
-/* Oficiální pozice G463 (zdroj pravdy — šablona skill matrix) */
-const G463_OFFICIAL = ['SKLAD','SEQ PREASSY','PREASSY RR','PREASSY FRT','SVÁŘEČKA',
-  'ASSEMBLY RR','ASSEMBLY FRT','REWORK','ANTISQEEK','HB PREASSY','HB KONTROLA','3CON','ROLLCOATER TPO'];
+/* Provozní názvy pozic G463 (zdroj pravdy — z týdenních rozpisů, které zná tým) */
+const G463_OPERATIONAL = ['Sklad','Sequence','Světýlko','Předmontáž','Montáž','Cobot',
+  'HB','Rework','Antisqueek','3Con','Montáž zacvik'];
 
-/* Jednorázová migrace: sladí uložené pozice G463 s oficiální maticí.
-   Staré pozice z rozpisu (Sklad, Sequence, Cobot…) se odstraní, pokud nenesou
-   data; případná case-insensitive duplicita (Sklad vs SKLAD) se přemigruje na
-   oficiální pravopis. Pozice s daty bez oficiální shody zůstanou na konci. */
+/* Překlad názvů z oficiální skill matice → provozní názvy pozic.
+   Import matice mapuje kvalifikace NA provozní pozice (klíč = VELKÝMI). */
+const MATRIX_TO_OPERATIONAL = {
+  'SKLAD':'Sklad', 'SEQ PREASSY':'Sequence', 'PREASSY RR':'Předmontáž', 'PREASSY FRT':'Předmontáž',
+  'ASSEMBLY RR':'Montáž', 'ASSEMBLY FRT':'Montáž', 'REWORK':'Rework', 'ANTISQEEK':'Antisqueek',
+  'HB PREASSY':'HB', 'HB KONTROLA':'HB', '3CON':'3Con'
+  // SVÁŘEČKA, ROLLCOATER TPO: bez potvrzeného mapování → ponechají se jako vlastní pozice
+};
+function toOperationalPos(name){ return MATRIX_TO_OPERATIONAL[String(name||'').toUpperCase()] || RENAME_MAP[name] || name; }
+
+/* Jednorázová migrace: sladí uložené pozice G463 na PROVOZNÍ názvy (které zná tým
+   z rozpisů). Případné oficiální názvy z dřívějška (SKLAD, ASSEMBLY RR…) se přemigrují
+   zpět na provozní (data se sloučí). Neznámé pozice s daty zůstanou na konci. */
 function migrateG463Positions(db){
-  if(db.migrations && db.migrations.g463Positions) return db;
+  if(db.migrations && db.migrations.g463Operational) return db;
   const proj = (db.projects||[]).find(p=>p.id==='g463');
   if(proj){
     const target = [], byNorm = new Map();
-    ['TL','TR'].forEach(p=>{ target.push(p); byNorm.set(posNorm(p), p); });
-    G463_OFFICIAL.forEach(st=>{ const k=posNorm(st); if(!byNorm.has(k)){ target.push(st); byNorm.set(k, st); } });
-
+    ['TL','TR'].concat(G463_OPERATIONAL).forEach(p=>{
+      if(!byNorm.has(posNorm(p))){ target.push(p); byNorm.set(posNorm(p), p); }
+    });
     const kept = [];
     proj.positions.forEach(oldPos=>{
-      const match = byNorm.get(posNorm(oldPos));
-      if(match){ if(match!==oldPos) migratePositionData(db, 'g463', oldPos, match); }
-      else if(positionHasData(db, 'g463', oldPos)) kept.push(oldPos);
-      else removePositionData(db, 'g463', oldPos);
+      const off = MATRIX_TO_OPERATIONAL[String(oldPos).toUpperCase()];   // oficiální → provozní
+      if(off){ if(off!==oldPos) migratePositionData(db, 'g463', oldPos, off); }
+      else {
+        const match = byNorm.get(posNorm(oldPos));
+        if(match){ if(match!==oldPos) migratePositionData(db, 'g463', oldPos, match); }
+        else if(positionHasData(db, 'g463', oldPos)) kept.push(oldPos);
+        else removePositionData(db, 'g463', oldPos);
+      }
     });
     proj.positions = target.concat(kept);
   }
   if(!db.migrations) db.migrations = {};
-  db.migrations.g463Positions = true;
+  db.migrations.g463Operational = true;
   return db;
 }
 
@@ -956,13 +969,13 @@ function applyMatrixImport(res){
     projCreated = true;
   }
 
-  // 2) oficiální matice = zdroj pravdy pro pozice.
-  //    Sestav cílový seznam: TL, TR + pracoviště z matice (pravopis z matice).
+  // 2) matice doplní kvalifikace na PROVOZNÍ pozice (názvy zná tým z rozpisů).
+  //    Sestav cílový seznam: TL, TR + pracoviště z matice přeložená na provozní názvy.
   const officialPos = [];
   const officialByNorm = new Map();
   ['TL','TR'].forEach(p=>{ officialPos.push(p); officialByNorm.set(posNorm(p), p); });
   res.stations.forEach(st=>{
-    const stU = RENAME_MAP[st]||st;
+    const stU = toOperationalPos(st);
     const k = posNorm(stU);
     if(!officialByNorm.has(k)){ officialPos.push(stU); officialByNorm.set(k, stU); }
   });
@@ -1005,8 +1018,9 @@ function applyMatrixImport(res){
     }
     if(!op.skills) op.skills={};
     Object.entries(emp.skills).forEach(([st,lvl])=>{
-      const stU = RENAME_MAP[st]||st;
-      op.skills[skillKey(proj.id, stU)] = lvl;
+      const stU = toOperationalPos(st);
+      const k = skillKey(proj.id, stU);
+      op.skills[k] = Math.max(op.skills[k]||0, lvl);   // víc stanic → provozní pozice: ber max
       skillsSet++;
     });
   });
@@ -1023,6 +1037,159 @@ function applyMatrixImport(res){
   msg += ` · ${res.employees.length} operátorů (${opsNew} nových${opsReactivated?`, ${opsReactivated} reaktivováno`:''}) · ${skillsSet} kvalifikací`;
   if(posKept.length) msg += ` · ⚠ Mimo oficiální matici (nesou data): ${posKept.join(', ')}`;
   toast(msg);
+}
+
+/* ============ EXPORT / IMPORT TÝDENNÍHO ROZPISU (.xlsx) ============ */
+/* Layout: Pozice | Ranní | Odpolední | Noční · víc operátorů = víc řádků v buňce */
+function exportRozpis(){
+  if(typeof XLSX==='undefined'){ toast('Knihovna XLSX se nenačetla'); return; }
+  const proj = projById(planProj); if(!proj){ toast('Vyber projekt'); return; }
+  const mon = currentMonday(); const wk = weekKey(mon);
+  const sun = new Date(mon.getTime()+6*86400000);
+  const plan = (DB.plans[wk]||{})[proj.id]||{};
+  const nm = ids => (ids||[]).map(id=>{const o=DB.operators.find(x=>x.id===id);return o?o.name:null;}).filter(Boolean).join('\n');
+  const aoa = [];
+  aoa.push(['ROZPIS SMĚN — '+proj.name]);
+  aoa.push(['CW '+isoWeek(mon)+' · '+fmtD(mon)+'–'+fmtD(sun)]);
+  aoa.push([]);
+  aoa.push(['Pozice','Ranní','Odpolední','Noční']);
+  proj.positions.forEach(pos=>{
+    const p = plan[pos]||{};
+    aoa.push([pos, nm(p.R), nm(p.O), nm(p.N)]);
+  });
+  aoa.push([]);
+  aoa.push(['Dovolená / Nemoc / Poznámky:']);
+  aoa.push([((DB.notes[wk]||{})[proj.id])||'']);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:20},{wch:26},{wch:26},{wch:26}];
+  const wbk = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wbk, ws, ('CW'+isoWeek(mon)).slice(0,31));
+  XLSX.writeFile(wbk, 'rozpis_'+proj.name.replace(/[^0-9A-Za-zÀ-ž]+/g,'_')+'_CW'+isoWeek(mon)+'.xlsx');
+  toast('Rozpis exportován (CW '+isoWeek(mon)+')');
+}
+
+function splitNames(v){ return String(v==null?'':v).split(/[\n;\/]+/).map(x=>x.trim()).filter(x=>x.length>1 && x.toLowerCase()!=='operator'); }
+
+/* Standardizovaný layout: hlavička s „Pozice | Ranní | Odpolední | Noční" */
+function parseRozpisStandard(rows){
+  let hi=-1; const cols={};
+  for(let i=0;i<Math.min(rows.length,20);i++){
+    const r=rows[i]||[];
+    if(String(r[0]||'').trim().toLowerCase()==='pozice'){
+      r.forEach((v,ci)=>{ const t=String(v||'').toLowerCase();
+        if(t.indexOf('rann')===0) cols.R=ci; else if(t.indexOf('odpoled')===0) cols.O=ci;
+        else if(t.indexOf('noč')===0||t.indexOf('noc')===0) cols.N=ci; });
+      if(cols.R!=null||cols.O!=null||cols.N!=null){ hi=i; break; }
+    }
+  }
+  if(hi<0) return null;
+  const positions={}, notes=[];
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i]||[]; const pos=String(r[0]==null?'':r[0]).trim();
+    if(!pos) continue;
+    if(/dovolen|nemoc|pozn/i.test(pos)){
+      for(let j=i+1;j<rows.length;j++){ const t=String((rows[j]||[])[0]||'').trim(); if(t) notes.push(t); }
+      break;
+    }
+    const rec={R:[],O:[],N:[]};
+    ['R','O','N'].forEach(sh=>{ if(cols[sh]!=null) rec[sh]=splitNames(r[cols[sh]]); });
+    positions[pos]=rec;
+  }
+  return Object.keys(positions).length?{positions,notes}:null;
+}
+
+/* Původní (legacy) layout: bloky „Operator | Pozice | Čas" pro každou směnu */
+function parseRozpisLegacy(rows){
+  let hi=-1, opCols=[];
+  for(let i=0;i<Math.min(rows.length,25);i++){
+    const r=rows[i]||[]; const cs=[];
+    r.forEach((v,ci)=>{ if(String(v||'').trim().toLowerCase()==='operator') cs.push(ci); });
+    if(cs.length){ hi=i; opCols=cs; break; }
+  }
+  if(hi<0) return null;
+  const shifts=['R','O','N'];
+  const blocks = opCols.map((oc,idx)=>({sh:shifts[idx]||('X'+idx), op:oc, pos:oc+1}));
+  const positions={}, notes=[];
+  const add=(pos,sh,name)=>{ if(!pos||!name) return; (positions[pos]=positions[pos]||{R:[],O:[],N:[]})[sh].push(name); };
+  for(let i=Math.max(0,hi-4);i<hi;i++){                       // TL/TR nad hlavičkou
+    const r=rows[i]||[];
+    blocks.forEach(b=>{ const role=String(r[b.pos]||'').trim(); const name=String(r[b.op]||'').trim();
+      if((role==='TL'||role==='TR')&&name) add(role,b.sh,name); });
+  }
+  for(let i=hi+1;i<rows.length;i++){                          // řádky pozic
+    const r=rows[i]||[];
+    blocks.forEach(b=>{
+      const name=String(r[b.op]==null?'':r[b.op]).trim();
+      const pos=String(r[b.pos]==null?'':r[b.pos]).trim();
+      if(!name||!pos) return;
+      if(/^(nemoc|dov|dovolen|absence)/i.test(pos)) notes.push(name+' — '+pos);
+      else if(name.toLowerCase()!=='operator'&&pos.toLowerCase()!=='pozice') add(pos,b.sh,name);
+    });
+  }
+  return Object.keys(positions).length?{positions,notes}:null;
+}
+
+function importRozpis(inp){
+  const f = inp.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      if(typeof XLSX==='undefined') throw new Error('Knihovna XLSX se nenačetla');
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      let parsed=null;
+      for(const sn of wb.SheetNames){
+        const ws = wb.Sheets[sn]; if(!ws || !ws['!ref']) continue;
+        const rng = XLSX.utils.decode_range(ws['!ref']); rng.s.r=0; rng.s.c=0;
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, range:rng});
+        const p = parseRozpisStandard(rows) || parseRozpisLegacy(rows);
+        if(p){ parsed=p; break; }
+      }
+      if(!parsed) throw new Error('nenašel jsem rozpis (hlavička „Pozice / Ranní / Odpolední / Noční" nebo „Operator / Pozice")');
+      applyRozpisImport(parsed);
+    }catch(err){ toast('Chyba importu rozpisu: '+err.message); }
+  };
+  reader.onerror=()=>toast('Chyba čtení souboru');
+  reader.readAsArrayBuffer(f);
+  inp.value='';
+}
+
+function applyRozpisImport(parsed){
+  const proj = projById(planProj);
+  if(!proj){ toast('Nejdřív vyber projekt'); return; }
+  const mon = currentMonday(); const wk = weekKey(mon);
+  if(!DB.plans[wk]) DB.plans[wk]={};
+  if(!DB.plans[wk][proj.id]) DB.plans[wk][proj.id]={};
+  const plan = DB.plans[wk][proj.id];
+  const posByNorm = new Map(proj.positions.map(p=>[posNorm(p),p]));
+  const byName = new Map(DB.operators.map(o=>[normName(o.name).toLowerCase(), o]));
+  let opsNew=0, opsReact=0, assigned=0, posAdded=0;
+
+  Object.entries(parsed.positions).forEach(([pos,rec])=>{
+    let actual = posByNorm.get(posNorm(pos));
+    if(!actual){ actual=pos; proj.positions.push(pos); posByNorm.set(posNorm(pos),pos); posAdded++; }
+    if(!plan[actual]) plan[actual]={};
+    PLAN_SHIFTS.forEach(s=>{
+      (rec[s.id]||[]).forEach(name=>{
+        const key = normName(name).toLowerCase();
+        let op = byName.get(key);
+        if(!op){ op={id:uid(),name:normName(name),skills:{},active:true}; DB.operators.push(op); byName.set(key,op); opsNew++; }
+        else if(!isActive(op)){ op.active=true; delete op.endDate; opsReact++; }
+        if(!plan[actual][s.id]) plan[actual][s.id]=[];
+        if(!plan[actual][s.id].includes(op.id)){ plan[actual][s.id].push(op.id); assigned++; }
+      });
+    });
+  });
+
+  if(parsed.notes && parsed.notes.length){
+    if(!DB.notes[wk]) DB.notes[wk]={};
+    const cur = DB.notes[wk][proj.id]||'';
+    DB.notes[wk][proj.id] = (cur?cur+'\n':'') + parsed.notes.join('\n');
+  }
+
+  captureSnapshot(); save();
+  planProj = proj.id; render();
+  toast('Rozpis '+proj.name+' · CW '+isoWeek(mon)+': '+assigned+' přiřazení · '+opsNew+' nových'
+    +(opsReact?', '+opsReact+' reaktivováno':'')+(posAdded?' · +'+posAdded+' pozic':''));
 }
 
 /* ============ TOAST ============ */

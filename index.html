@@ -82,6 +82,9 @@
     </div>
     <select id="planArea" onchange="setPlanArea(this.value)" style="font-weight:600;min-width:200px"></select>
     <button class="btn sec sm" onclick="copyPrevWeek()">Kopírovat minulý týden</button>
+    <button class="btn sec sm" onclick="document.getElementById('impRozpis').click()">Import rozpisu (.xlsx)</button>
+    <input type="file" id="impRozpis" accept=".xlsx,.xls" style="display:none" onchange="importRozpis(this)">
+    <button class="btn sec sm" onclick="exportRozpis()">Export rozpisu (.xlsx)</button>
     <button class="btn sm" onclick="printPlan()">PDF pro TL</button>
   </div>
   <div id="planBody"></div>
