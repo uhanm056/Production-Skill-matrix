@@ -33,17 +33,18 @@ const RENAME_MAP = {
   'RW':'Rework', 'PNCH':'Punching', 'Fleece + PNCH':'Fleece + Punching'
 };
 
-/* Provozní názvy pozic G463 (zdroj pravdy — z týdenních rozpisů, které zná tým) */
-const G463_OPERATIONAL = ['Sklad','Sequence','Světýlko','Předmontáž','Montáž','Cobot',
-  'HB','Rework','Antisqueek','3Con','Montáž zacvik'];
+/* Provozní názvy pozic G463 (zdroj pravdy — z týdenních rozpisů, které zná tým).
+   Svářečka = proces po Předmontáži · Rollcoater TPO = samostatný proces G463. */
+const G463_OPERATIONAL = ['Sklad','Sequence','Světýlko','Předmontáž','Svářečka','Montáž','Cobot',
+  'HB','Rework','Antisqueek','3Con','Montáž zacvik','Rollcoater TPO'];
 
 /* Překlad názvů z oficiální skill matice → provozní názvy pozic.
    Import matice mapuje kvalifikace NA provozní pozice (klíč = VELKÝMI). */
 const MATRIX_TO_OPERATIONAL = {
   'SKLAD':'Sklad', 'SEQ PREASSY':'Sequence', 'PREASSY RR':'Předmontáž', 'PREASSY FRT':'Předmontáž',
-  'ASSEMBLY RR':'Montáž', 'ASSEMBLY FRT':'Montáž', 'REWORK':'Rework', 'ANTISQEEK':'Antisqueek',
-  'HB PREASSY':'HB', 'HB KONTROLA':'HB', '3CON':'3Con'
-  // SVÁŘEČKA, ROLLCOATER TPO: bez potvrzeného mapování → ponechají se jako vlastní pozice
+  'SVÁŘEČKA':'Svářečka', 'ASSEMBLY RR':'Montáž', 'ASSEMBLY FRT':'Montáž', 'REWORK':'Rework',
+  'ANTISQEEK':'Antisqueek', 'HB PREASSY':'HB', 'HB KONTROLA':'HB', '3CON':'3Con',
+  'ROLLCOATER TPO':'Rollcoater TPO'
 };
 function toOperationalPos(name){ return MATRIX_TO_OPERATIONAL[String(name||'').toUpperCase()] || RENAME_MAP[name] || name; }
 
@@ -51,7 +52,7 @@ function toOperationalPos(name){ return MATRIX_TO_OPERATIONAL[String(name||'').t
    z rozpisů). Případné oficiální názvy z dřívějška (SKLAD, ASSEMBLY RR…) se přemigrují
    zpět na provozní (data se sloučí). Neznámé pozice s daty zůstanou na konci. */
 function migrateG463Positions(db){
-  if(db.migrations && db.migrations.g463Operational) return db;
+  if(db.migrations && db.migrations.g463OperationalV2) return db;
   const proj = (db.projects||[]).find(p=>p.id==='g463');
   if(proj){
     const target = [], byNorm = new Map();
@@ -72,7 +73,7 @@ function migrateG463Positions(db){
     proj.positions = target.concat(kept);
   }
   if(!db.migrations) db.migrations = {};
-  db.migrations.g463Operational = true;
+  db.migrations.g463OperationalV2 = true;
   return db;
 }
 
